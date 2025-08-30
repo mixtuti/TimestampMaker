@@ -217,6 +217,30 @@
       border-radius:999px;
       padding:2px 8px
     }
+
+    .speed-buttons {
+      display:flex;
+      gap:6px;
+    }
+
+    .speed-buttons button {
+      background:#0b1220;
+      border:1px solid #223047;
+      border-radius:8px;
+      padding:6px 12px;
+      cursor:pointer;
+      transition:.15s;
+    }
+
+    .speed-buttons button:hover {
+      border-color:#2f415f;
+    }
+    
+    .speed-buttons button.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight:600;
+    }
   </style>
 </head>
 <body>
@@ -270,6 +294,15 @@
           <button id="fwd5">⏩ 5秒進む</button>
           <button id="markBtn" class="ok" title="M で現在時刻を追加">📌 現在時刻を追加 (M)</button>
           <input id="quickLabel" type="text" placeholder="ラベル（例：OP / ボス戦 / ガチャ）" style="max-width:280px" />
+        </div>
+        <div class="pill">
+          <span style="min-width:80px">再生速度</span>
+          <div class="speed-buttons">
+            <button data-speed="0.5">0.5x</button>
+            <button data-speed="1" class="active">1x</button>
+            <button data-speed="1.5">1.5x</button>
+            <button data-speed="2">2x</button>
+          </div>
         </div>
         <div class="hint" style="margin-top:6px">ショートカット：<span class="kbd">Space</span> 再生/停止（外部モード時はストップウォッチ）・<span class="kbd">M</span> 追加・<span class="kbd">[</span>/<span class="kbd">]</span> 最後の項目を−/+1秒・<span class="kbd">Del</span> 最後を削除</div>
       </div>
@@ -458,8 +491,87 @@
     $('#loadBtn').addEventListener('click', async ()=>{ const input = $('#videoInput').value; const id = extractVideoId(input); if(!id){ alert('URL もしくは動画ID を正しく入力してください'); return; } videoId = id; playerReady=false; await loadPlayer(videoId); $('#quickLabel').focus(); });
     $('#videoInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); $('#loadBtn').click(); }});
 
+    // ==== 再生速度コントロール ====
+    // 埋め込み時: YouTubeの再生速度
+    let speed = 1; // 現在の希望速度
+    let extRate = 1; // 外部モード用の倍率
+
+    const speedBtns = document.querySelectorAll('.speed-buttons button');
+
+    function setActiveSpeedButton(rate){
+      speedBtns.forEach(b=>{
+        b.classList.toggle('active', parseFloat(b.dataset.speed) === rate);
+      });
+    }
+
+    function getPlayerAvailableRates(){
+      // 埋め込みプレイヤーが対応している速度（端末によって異なる）
+      if (playerReady && typeof player.getAvailablePlaybackRates === 'function') {
+        try { return player.getAvailablePlaybackRates(); } catch(_) {}
+      }
+      // 代表的な既定値
+      return [0.25,0.5,0.75,1,1.25,1.5,1.75,2];
+    }
+
+    function clampToNearestAvailable(rate, avail){
+      // 利用不可の速度が選ばれたら最も近い値に寄せる
+      let nearest = avail[0], best = Math.abs(avail[0] - rate);
+      for (const r of avail){ const d = Math.abs(r - rate); if (d < best){ best=d; nearest=r; } }
+      return nearest;
+    }
+
+    function applySpeed(rate){
+      speed = rate;
+      if ($('#externalMode').checked){
+        // 外部モード: 任意倍率OK
+        extRate = rate;
+      } else if (playerReady){
+        const avail = getPlayerAvailableRates();
+        const setRate = avail.includes(rate) ? rate : clampToNearestAvailable(rate, avail);
+        try { player.setPlaybackRate(setRate); } catch(_) {}
+      }
+      setActiveSpeedButton(rate);
+    }
+
+    function refreshSpeedButtonsState(){
+      const external = $('#externalMode').checked;
+      const avail = external ? null : getPlayerAvailableRates();
+
+      speedBtns.forEach(b=>{
+        const r = parseFloat(b.dataset.speed);
+        const supported = external ? true : avail.includes(r);
+        b.disabled = !supported;
+        b.title = supported ? '' : 'この速度は埋め込みプレイヤーで未サポート';
+      });
+    }
+
+    // クリックで速度変更
+    speedBtns.forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const r = parseFloat(b.dataset.speed);
+        applySpeed(r);
+      });
+    });
+
+    // モード切り替え時にボタンの有効/無効を更新
+    $('#externalMode').addEventListener('change', ()=>{
+      refreshSpeedButtonsState();
+      applySpeed(speed); // 現在値を外部/埋め込みに再適用
+    });
+
+    // プレイヤー読み込み完了時にも更新
+    function onPlayerReadySpeedHook(){
+      refreshSpeedButtonsState();
+      applySpeed(speed);
+    }
+
+    // 初期化
+    refreshSpeedButtonsState();
+    applySpeed(1); // デフォルト1x
+
     // Initial render
-    render(); updateExportPreview();
+    render();
+    updateExportPreview();
   </script>
 </body>
 </html>
